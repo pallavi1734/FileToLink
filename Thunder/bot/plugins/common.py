@@ -145,7 +145,7 @@ async def start_command(bot: Client, message: Message):
         args = message.text.strip().split("_", 1)
         if len(args) == 1 or args[-1].lower() == "start":
             welcome_text = (
-                "👋 **Welcome to the Thunder File to Link Bot!**\n\n"
+                "👋 **Welcome to the MRVIOLET STREAM BOT**\n\n"
                 "I can generate direct download and streaming links for your files. "
                 "Simply send me any file, and I'll provide you with shareable links.\n\n"
                 "📌 **Available Commands:**\n"
@@ -211,7 +211,7 @@ async def help_command(bot: Client, message: Message):
             await log_new_user(bot, message.from_user.id, message.from_user.first_name)
             
         help_text = (
-            "📚 **How to Use Thunder File to Link Bot**\n\n"
+            "📚 **How to Use MRVIOLET STREAM BOT**\n\n"
             "**🔹 For Direct Links:**\n"
             "• Send any file to the bot\n"
             "• Receive download and streaming links instantly\n\n"
@@ -240,7 +240,7 @@ async def about_command(bot: Client, message: Message):
             await log_new_user(bot, message.from_user.id, message.from_user.first_name)
             
         about_text = (
-            "🤖 **About Thunder File to Link Bot**\n\n"
+            "🤖 **About MRVIOLET STREAM BOT**\n\n"
             "A powerful bot that generates direct download and streaming links for your Telegram files.\n\n"
             "**✨ Features:**\n"
             "• 🔗 Instant link generation\n"
@@ -250,7 +250,7 @@ async def about_command(bot: Client, message: Message):
             "• 🔒 Secure file sharing\n"
             "• 📱 Mobile-friendly interface\n\n"
             "• Processing: Lightning fast\n\n"
-            "Developed with ❤️ by the help of [AI](https://github.com/fyaz05/FileToLink/)"
+            "Developed with ❤️ by the help of [AI](https://t.me/THECIDANIME)"
         )
         await message.reply_text(text=about_text, disable_web_page_preview=True)
     except Exception as e:
