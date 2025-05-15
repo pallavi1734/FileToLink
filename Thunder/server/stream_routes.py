@@ -7,6 +7,7 @@ import re
 import secrets
 import time
 import json
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from aiohttp import web
 from aiohttp.client_exceptions import ClientConnectionError
@@ -53,13 +54,15 @@ def exception_handler(func):
         try:
             return await func(request)
         except InvalidHash as e:
+            logger.debug(f"InvalidHash exception: {e}")
             raise web.HTTPForbidden(
                 text=json_error(403, "Invalid security credentials"),
                 content_type="application/json"
             )
         except FileNotFound as e:
+            logger.debug(f"FileNotFound exception: {e}")
             raise web.HTTPNotFound(
-                text=json_error(404, str(e)),
+                text=json_error(404, "File not found"),
                 content_type="application/json"
             )
         except (ClientConnectionError, asyncio.CancelledError):
@@ -67,25 +70,45 @@ def exception_handler(func):
         except web.HTTPException:
             raise
         except Exception as e:
-            logger.exception("Unhandled exception")
+            # Log the full exception with stack trace for debugging, but don't expose it to users
+            error_id = secrets.token_hex(6)  # Generate a unique error ID for reference
+            logger.error(f"Unhandled exception (ID: {error_id}): {str(e)}")
+            logger.error(f"Stack trace for error {error_id}:\n{traceback.format_exc()}")
+            
             raise web.HTTPInternalServerError(
-                text=json_error(500, "Internal server error"),
+                text=json_error(500, f"Internal server error (Reference ID: {error_id})"),
                 content_type="application/json"
             )
     return wrapper
 
 def parse_media_request(path: str, query: dict) -> tuple[int, str]:
     clean_path = unquote(path).strip('/')
+    # Validate and restrict hash format to avoid injection
     match = PATTERN_HASH_FIRST.match(clean_path)
     if match:
-        return int(match.group(2)), match.group(1)
+        # Ensure message_id is a valid integer
+        try:
+            message_id = int(match.group(2))
+            secure_hash = match.group(1)
+            # Validate secure_hash contains only allowed characters
+            if not re.match(r'^[a-zA-Z0-9_-]+$', secure_hash):
+                raise InvalidHash("Security token contains invalid characters")
+            return message_id, secure_hash
+        except ValueError:
+            raise InvalidHash("Invalid message ID format")
     match = PATTERN_ID_FIRST.match(clean_path)
     if match:
-        message_id = int(match.group(1))
-        secure_hash = query.get("hash", "")
-        if len(secure_hash) != SECURE_HASH_LENGTH:
-            raise InvalidHash("Security token length mismatch")
-        return message_id, secure_hash
+        try:
+            message_id = int(match.group(1))
+            secure_hash = query.get("hash", "").strip()
+            # Validate hash format and length
+            if len(secure_hash) != SECURE_HASH_LENGTH:
+                raise InvalidHash("Security token length mismatch")
+            if not re.match(r'^[a-zA-Z0-9_-]+$', secure_hash):
+                raise InvalidHash("Security token contains invalid characters")
+            return message_id, secure_hash
+        except ValueError:
+            raise InvalidHash("Invalid message ID format")
     raise InvalidHash("Invalid URL structure")
 
 def optimal_client_selection():
@@ -185,11 +208,20 @@ async def status_endpoint(request):
 async def media_preview(request: web.Request):
     path = request.match_info["path"]
     message_id, secure_hash = parse_media_request(path, request.query)
+    # message_id is already validated as an integer in parse_media_request
+    # secure_hash is validated for length and used for authentication
     rendered_page = await render_page(message_id, secure_hash)
     return web.Response(
         text=rendered_page,
         content_type='text/html',
-        headers={"Cache-Control": "no-cache, must-revalidate"}
+        headers={
+            "Cache-Control": "no-cache, must-revalidate",
+            "Content-Security-Policy": "default-src 'self' https:; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://cdn.plyr.io; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://cdn.plyr.io; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; connect-src 'self' https:; media-src 'self' https:;",
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "SAMEORIGIN",  
+            "X-XSS-Protection": "1; mode=block",
+            "Referrer-Policy": "strict-origin-when-cross-origin"
+        }
     )
 
 @routes.get(r"/{path:.+}", allow_head=True)
@@ -198,6 +230,7 @@ async def media_delivery(request: web.Request):
     client_id, client = optimal_client_selection()
     async with track_workload(client_id):
         path = request.match_info["path"]
+        # Inputs are sanitized and validated in parse_media_request
         message_id, secure_hash = parse_media_request(path, request.query)
         return await handle_media_stream(request, message_id, secure_hash, client_id, client)
 
@@ -211,6 +244,7 @@ async def handle_media_stream(request, message_id, secure_hash, client_id, clien
     if range_header:
         range_match = RANGE_REGEX.fullmatch(range_header)
         if not range_match:
+            logger.debug(f"Malformed range header received: {range_header}")
             raise web.HTTPBadRequest(
                 text=json_error(400, "Malformed range header"),
                 content_type="application/json"
@@ -227,6 +261,7 @@ async def handle_media_stream(request, message_id, secure_hash, client_id, clien
         except Exception:
             start, end = 0, file_size - 1
     if start < 0 or end >= file_size or start > end:
+        logger.debug(f"Invalid range request: start={start}, end={end}, file_size={file_size}")
         raise web.HTTPRequestRangeNotSatisfiable(
             headers={"Content-Range": f"bytes */{file_size}"}
         )
@@ -246,7 +281,10 @@ async def handle_media_stream(request, message_id, secure_hash, client_id, clien
         "Content-Disposition": f"{disposition}; filename*=UTF-8''{encoded_filename}",
         "Accept-Ranges": "bytes",
         "Cache-Control": "public, max-age=31536000, immutable",
-        "Connection": "keep-alive"
+        "Connection": "keep-alive",
+        # Add security headers for media responses
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin"
     }
     if hasattr(streamer, 'async_yield_file'):
         stream_generator = streamer.async_yield_file(
