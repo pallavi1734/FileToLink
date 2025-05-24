@@ -1,66 +1,97 @@
-# Thunder/vars.py
+"""
+Thunder/vars.py - Configuration variables for the Thunder bot.
+"""
 
+from typing import Set, Optional, List
 import os
 from dotenv import load_dotenv
-from typing import Set, Optional
+from Thunder.utils.logger import logger
 
-load_dotenv()
+# Load environment variables from config.env
+load_dotenv("config.env")
 
-def str2bool(value: str) -> bool:
-    # Convert string to boolean value
-    return value.lower() in ('true', '1', 'yes', 'y', 't')
+# Helper functions for parsing environment variables
+def str_to_bool(val: str) -> bool:
+    """Convert string value to boolean."""
+    return val.lower() in ("true", "1", "t", "y", "yes")
+
+def str_to_int_list(val: str) -> List[int]:
+    """Convert space-separated string to list of integers."""
+    if not val:
+        return []
+    return [int(x) for x in val.split() if x.isdigit()]
+
+def str_to_int_set(val: str) -> Set[int]:
+    """Convert space-separated string to set of integers."""
+    if not val:
+        return set()
+    return set(int(x) for x in val.split() if x.isdigit())
 
 class Var:
-    # Configuration variables for the Thunder bot
-    
+    """Configuration variables for the Thunder bot."""
+
     # Telegram API credentials
-    API_ID: int = int(os.getenv('API_ID', ''))
-    API_HASH: str = os.getenv('API_HASH', '')
-    
+    API_ID: int = int(os.getenv("API_ID", ""))
+    if not API_ID:
+        logger.critical("CRITICAL: API_ID is not configured in config.env!")
+        raise ValueError("CRITICAL: API_ID is not configured in config.env!")
+        
+    API_HASH: str = os.getenv("API_HASH", "")
+    if not API_HASH:
+        logger.critical("CRITICAL: API_HASH is not configured in config.env!")
+        raise ValueError("CRITICAL: API_HASH is not configured in config.env!")
+
     # Bot token and identity
-    BOT_TOKEN: str = os.getenv('BOT_TOKEN', '')
-    NAME: str = os.getenv('NAME', 'ThunderF2L')
+    BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
+    if not BOT_TOKEN:
+        logger.critical("CRITICAL: BOT_TOKEN is not configured in config.env!")
+        raise ValueError("CRITICAL: BOT_TOKEN is not configured in config.env!")
+    NAME: str = os.getenv("NAME", "ThunderF2L")
     
     # Performance settings
-    SLEEP_THRESHOLD: int = int(os.getenv('SLEEP_THRESHOLD', '60'))
-    WORKERS: int = int(os.getenv('WORKERS', '100'))
-    
+    SLEEP_THRESHOLD: int = int(os.getenv("SLEEP_THRESHOLD", "60"))
+    WORKERS: int = int(os.getenv("WORKERS", "100"))
+
     # Channel for file storage
-    BIN_CHANNEL: int = int(os.getenv('BIN_CHANNEL', ''))
-    
+    BIN_CHANNEL: int = int(os.getenv("BIN_CHANNEL", "0"))
+    if not BIN_CHANNEL:
+        logger.critical("CRITICAL: BIN_CHANNEL is not configured in config.env!")
+        raise ValueError("CRITICAL: BIN_CHANNEL is not configured in config.env!")
+
     # Web server configuration
-    PORT: int = int(os.getenv('PORT', '460'))
-    BIND_ADDRESS: str = os.getenv('WEB_SERVER_BIND_ADDRESS', '0.0.0.0')
-    PING_INTERVAL: int = int(os.getenv('PING_INTERVAL', '1200'))  # 20 minutes
-    NO_PORT: bool = str2bool(os.getenv('NO_PORT', 'True'))
-    CACHE_SIZE: int = int(os.getenv('CACHE_SIZE', '100'))
+    PORT: int = int(os.getenv("PORT", "8080"))
+    BIND_ADDRESS: str = os.getenv("BIND_ADDRESS", "0.0.0.0")
+    PING_INTERVAL: int = int(os.getenv("PING_INTERVAL", "840"))
+    NO_PORT: bool = str_to_bool(os.getenv("NO_PORT", "True"))
+    CACHE_SIZE: int = int(os.getenv("CACHE_SIZE", "100"))
     
     # Owner details
-    OWNER_ID: Set[int] = set(int(x) for x in os.getenv('OWNER_ID', '').split() if x.isdigit())
-    OWNER_USERNAME: str = os.getenv('OWNER_USERNAME', '')
+    OWNER_ID: List[int] = str_to_int_list(os.getenv("OWNER_ID", ""))
+    if not OWNER_ID:
+        logger.warning("WARNING: OWNER_ID is empty. No user will have admin access.")
+    OWNER_USERNAME: str = os.getenv("OWNER_USERNAME", "")
     
-    # Deployment configuration
-    APP_NAME: str = os.getenv('APP_NAME', '')
-    ON_HEROKU: bool = 'DYNO' in os.environ
-    
-    # Domain name configuration
-    if ON_HEROKU:
-        FQDN: str = os.getenv('FQDN', '') or f"{APP_NAME}.herokuapp.com"
-    else:
-        FQDN: str = os.getenv('FQDN', BIND_ADDRESS)
-    
-    # SSL and URL configuration
-    HAS_SSL: bool = str2bool(os.getenv('HAS_SSL', 'True'))
-    URL: str = f"https://{FQDN}/" if HAS_SSL else f"http://{FQDN}/"
+    # Domain and URL configuration
+    FQDN: str = os.getenv("FQDN", "") or BIND_ADDRESS
+    HAS_SSL: bool = str_to_bool(os.getenv("HAS_SSL", "False"))
+    PROTOCOL: str = "https" if HAS_SSL else "http"
+    PORT_SEGMENT: str = "" if NO_PORT else f":{PORT}"
+    URL: str = f"{PROTOCOL}://{FQDN}{PORT_SEGMENT}/"
     
     # Database configuration
-    DATABASE_URL: str = os.getenv('DATABASE_URL', '')
-    
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+
     # Channel configurations
-    UPDATES_CHANNEL: Optional[str] = os.getenv('UPDATES_CHANNEL')
-    BANNED_CHANNELS: Set[int] = set(
-        int(x) for x in os.getenv('BANNED_CHANNELS', '').split() if x.lstrip('-').isdigit()
-    )
+    BANNED_CHANNELS: Set[int] = str_to_int_set(os.getenv("BANNED_CHANNELS", ""))
     
     # Multi-client support flag
     MULTI_CLIENT: bool = False
+
+    # Force channel configuration
+    FORCE_CHANNEL_ID: Optional[int] = None
+    force_channel_env = os.getenv("FORCE_CHANNEL_ID", "").strip()
+    if force_channel_env:
+        try:
+            FORCE_CHANNEL_ID = int(force_channel_env)
+        except ValueError:
+            logger.warning(f"Invalid FORCE_CHANNEL_ID '{force_channel_env}' in environment; must be an integer.")
